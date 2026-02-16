@@ -18,18 +18,41 @@ app.get("/", (req, res) => {
 // Rota de tracking
 app.post("/track", async (req, res) => {
     const { event, session_id, data } = req.body;
-    // Se for envio de mensagem do usuário
+    
+    // Verifica se sessão já existe
+    const { data: existingSession } = await supabase
+        .from("sessions")
+        .select("id")
+        .eq("id", session_id)
+        .single();
+        
+    // Se não existir, cria
+    if (!existingSession) {
+        await supabase.from("sessions").insert([
+            { 
+                id: session_id, 
+                ip: data?.ip || null, 
+                user_agent: data?.user_agent || null, 
+                country: data?.country || null, 
+                state: data?.state || null 
+            }
+        ]);
+    }
+    
+    // Salva mensagem do usuário
     if (event === "message_sent") {
         await supabase.from("messages").insert([
             { session_id: session_id, sender: "user", message: data.message }
         ]);
     }
-    // Se for resposta do bot
+    
+    // Salva resposta do bot
     if (event === "message_received") {
         await supabase.from("messages").insert([
             { session_id: session_id, sender: "bot", message: data.response }
         ]);
     }
+    
     res.json({ status: "ok" });
 });
 
