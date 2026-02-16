@@ -1,4 +1,4 @@
-// chat.js - COM TRACKING PARA SUPABASE
+// chat.js - LIVEZILLA 2.0 FINAL - Equality Corretora
 
 const chatBody = document.getElementById("chat-body");
 const chatContainer = document.getElementById("chat-container");
@@ -6,7 +6,7 @@ const chatWrapper = document.querySelector(".chat-wrapper");
 const chatToggle = document.querySelector(".chat-toggle");
 const userInput = document.getElementById("user-input");
 
-// Backend URL CORRIGIDO (com https://)
+// Configurações
 const BACKEND_URL = "https://backend-api-app.arj8vq.easypanel.host";
 const WEBHOOK_URL = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
 const BOT_AVATAR = "https://equalitycorretora.com.br/wp-content/uploads/2026/02/anne-final.png";
@@ -27,6 +27,33 @@ const MENU_OPTIONS = [
     { icon: "💬", text: "Falar com atendente agora" }
 ];
 
+// ===== SESSION ID =====
+function getSessionId() {
+    let id = sessionStorage.getItem("aneSessionId");
+    if (!id) {
+        id = "ane_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
+        sessionStorage.setItem("aneSessionId", id);
+    }
+    return id;
+}
+
+// ===== TRACKING =====
+async function sendTrackEvent(event, data = {}) {
+    try {
+        await fetch(`${BACKEND_URL}/track`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                event: event,
+                session_id: getSessionId(),
+                data: data
+            })
+        });
+    } catch (e) {
+        console.error("Erro no tracking:", e);
+    }
+}
+
 // ===== TOGGLE CHAT =====
 function toggleChat() {
     const isOpen = chatContainer.style.display === "flex";
@@ -40,10 +67,8 @@ function toggleChat() {
         
         if (isFirstOpen) {
             isFirstOpen = false;
-            setTimeout(() => {
-                showWelcome();
-                sendTrackEvent("chat_opened", {});
-            }, 300);
+            sendTrackEvent("chat_opened");
+            setTimeout(showWelcome, 300);
         }
         
         setTimeout(() => {
@@ -56,16 +81,6 @@ function maximizeChat() {
     if (chatContainer) {
         chatContainer.classList.toggle("maximized");
     }
-}
-
-// ===== SESSION ID =====
-function getSessionId() {
-    let id = sessionStorage.getItem("aneSessionId");
-    if (!id) {
-        id = "ane_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
-        sessionStorage.setItem("aneSessionId", id);
-    }
-    return id;
 }
 
 // ===== HORÁRIO =====
@@ -99,14 +114,9 @@ function showWelcome() {
     }, 400);
 }
 
-// ===== MOSTRAR BOTÕES DO MENU =====
+// ===== MENU DE BOTÕES =====
 function showMenuButtons() {
     if (!chatBody) return;
-
-    const existingButtons = document.getElementById("menu-buttons-container");
-    if (existingButtons) {
-        existingButtons.remove();
-    }
 
     const container = document.createElement("div");
     container.className = "quick-buttons";
@@ -127,7 +137,6 @@ function showMenuButtons() {
         btn.appendChild(label);
 
         btn.onclick = function () {
-            container.remove();
             addUserMessage(option.text);
             sendToBot(option.text);
         };
@@ -175,9 +184,11 @@ function addBotMessage(text) {
     const content = document.createElement("div");
     content.className = "message-content";
 
-    let cleanText = text.replace(/^"+|"+$/g, "").trim();
-    cleanText = cleanText.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-    cleanText = cleanText.replace(/\n/g, "<br>");
+    let cleanText = text.replace(/^\"+|\"+$/g, "").trim();
+    cleanText = cleanText
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color: #128c7e; text-decoration: none;">$1</a>')
+        .replace(/\n/g, "<br>");
 
     content.innerHTML = cleanText;
 
@@ -194,11 +205,11 @@ function addBotMessage(text) {
     scrollToBottom();
 }
 
-// ===== BOTÕES DINÂMICOS DA RESPOSTA =====
+// ===== BOTÕES DINÂMICOS =====
 function parseDynamicButtons(text) {
     if (!chatBody) return;
 
-    const btnRegex = /\[([^\]]+)\]/g;
+    const btnRegex = /\[([^\\]]+)\]/g;
     const matches = [];
     let match;
     while ((match = btnRegex.exec(text)) !== null) {
@@ -217,7 +228,6 @@ function parseDynamicButtons(text) {
             btn.className = "quick-btn";
             btn.textContent = option;
             btn.onclick = function () {
-                container.remove();
                 addUserMessage(option);
                 sendToBot(option);
             };
@@ -229,7 +239,7 @@ function parseDynamicButtons(text) {
     }
 }
 
-// ===== SCROLL =====
+// ===== UTILS =====
 function scrollToBottom() {
     if (chatBody) {
         setTimeout(() => {
@@ -238,28 +248,22 @@ function scrollToBottom() {
     }
 }
 
-// ===== TYPING INDICATOR =====
 function showTyping() {
     if (!chatBody) return;
-    if (document.getElementById("tracking-indicator")) return;
+    if (document.getElementById("typing-indicator")) return;
 
     const msg = document.createElement("div");
     msg.className = "message message-bot";
-    msg.id = "tracking-indicator";
+    msg.id = "typing-indicator";
 
     const avatar = document.createElement("img");
     avatar.src = BOT_AVATAR;
     avatar.className = "bot-avatar";
-    avatar.alt = "Ane";
 
     const content = document.createElement("div");
     content.className = "message-content";
+    content.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
 
-    const dots = document.createElement("div");
-    dots.className = "typing-dots";
-    dots.innerHTML = "<span></span><span></span><span></span>";
-
-    content.appendChild(dots);
     msg.appendChild(avatar);
     msg.appendChild(content);
     chatBody.appendChild(msg);
@@ -267,11 +271,10 @@ function showTyping() {
 }
 
 function removeTyping() {
-    const typing = document.getElementById("tracking-indicator");
+    const typing = document.getElementById("typing-indicator");
     if (typing) typing.remove();
 }
 
-// ===== PROCESSAR RESPOSTA (STREAMING) =====
 function handleResponse(text) {
     const lines = text.split("\n").filter(Boolean);
     let botResponse = "";
@@ -288,62 +291,40 @@ function handleResponse(text) {
             }
         }
     }
-
-    addBotMessage(botResponse || "Desculpe, não consegui processar sua solicitação. Tente novamente.");
-}
-
-// ===== ENVIAR EVENTO DE TRACKING =====
-function sendTrackEvent(eventType, data) {
-    const payload = {
-        event: eventType,
-        session_id: getSessionId(),
-        timestamp: new Date().toISOString(),
-        url: window.location.href,
-        user_agent: navigator.userAgent,
-        data: data
-    };
     
-    fetch(BACKEND_URL + "/track", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    }).catch(err => console.error("Erro tracking:", err));
+    const finalResponse = botResponse || "Desculpe, tive um problema técnico.";
+    addBotMessage(finalResponse);
+    sendTrackEvent("message_received", { response: finalResponse });
 }
 
-// ===== ENVIAR PARA O N8N =====
-function sendToBot(text) {
+// ===== ACTIONS =====
+async function sendToBot(text) {
     if (isSending) return;
     isSending = true;
 
     sendTrackEvent("message_sent", { message: text });
-
     showTyping();
 
-    fetch(WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            sessionId: getSessionId(),
-            chatInput: text
-        })
-    })
-    .then(res => res.text())
-    .then(data => {
+    try {
+        const res = await fetch(WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sessionId: getSessionId(),
+                chatInput: text
+            })
+        });
+        const data = await res.text();
         handleResponse(data);
-        sendTrackEvent("message_received", { message: text, response: data.substring(0, 200) });
-        isSending = false;
-    })
-    .catch(err => {
+    } catch (err) {
         removeTyping();
-        if (chatBody) {
-            addBotMessage("⚠️ Erro ao conectar com o servidor. Tente novamente.");
-        }
+        addBotMessage("⚠️ Erro ao conectar com a Anne. Tente novamente.");
+        console.error(err);
+    } finally {
         isSending = false;
-        console.error("Erro webhook:", err);
-    });
+    }
 }
 
-// ===== ENVIAR MENSAGEM (INPUT) =====
 function sendMessage() {
     const message = userInput.value.trim();
     if (!message || isSending) return;
@@ -354,17 +335,14 @@ function sendMessage() {
 }
 
 // ===== EVENT LISTENERS =====
-if (chatToggle) {
-    chatToggle.addEventListener("click", toggleChat);
-}
-
+if (chatToggle) chatToggle.addEventListener("click", toggleChat);
 if (userInput) {
-    userInput.addEventListener("keypress", function (e) {
+    userInput.addEventListener("keypress", (e) => {
         if (e.key === "Enter") sendMessage();
     });
 }
 
-// Auto-abrir chat após 8 segundos (apenas uma vez por sessão)
+// Auto-open
 (function autoOpen() {
     if (!sessionStorage.getItem("aneAutoOpened")) {
         setTimeout(() => {
