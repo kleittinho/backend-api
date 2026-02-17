@@ -3,7 +3,6 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import mysql from 'mysql2/promise';
 import fetch from "node-fetch";
-import crypto from "crypto";
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -24,32 +23,16 @@ const legacyPool = mysql.createPool({
     waitForConnections: true, connectionLimit: 10
 });
 
-app.get("/", (req, res) => res.send("LiveZilla Platinum v10.3 - Integrated Lab Active 🧪🚀"));
+app.get("/", (req, res) => res.send("LiveZilla Platinum v10.4 - Unified Intelligence Engine Active 🛡️🚀"));
 
 // --- AUTH ---
 app.post("/auth/login", async (req, res) => {
     const { username, password } = req.body;
     try {
-        const [rows] = await mysqlPool.execute("SELECT id, username, full_name, email FROM operators WHERE username = ? AND password = ?", [username, password]);
+        const [rows] = await mysqlPool.execute("SELECT id, username, full_name FROM operators WHERE username = ? AND password = ?", [username, password]);
         if (rows.length > 0) res.json({ status: "success", user: rows[0] });
         else res.status(401).json({ status: "error" });
     } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// --- TRACKING ---
-app.post("/track", async (req, res) => {
-    const { session_id, event, url, title, geo, tech } = req.body;
-    if (!session_id) return res.json({ status: "skipped" });
-    try {
-        const ip = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-        await supabase.from("sessions").upsert({
-            id: session_id, ip: String(ip), state: 'active', url: url || null,
-            city: geo?.city || null, country_code: geo?.country || null,
-            os: tech?.os || null, user_agent: req.headers['user-agent'], updated_at: new Date().toISOString()
-        });
-        if (event === "page_view") await supabase.from("visitor_path").insert([{ session_id, url: url || '', title: title || 'Página' }]);
-        res.json({ status: "ok" });
-    } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 // --- LEGACY LAB ---
@@ -74,18 +57,10 @@ app.get("/admin/dossiers", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/admin/persist-dossier", async (req, res) => {
+app.post("/admin/delete-dossier", async (req, res) => {
     const { session_id } = req.body;
     try {
-        const [session, path] = await Promise.all([
-            supabase.from("sessions").select("*").eq("id", session_id).single(),
-            supabase.from("visitor_path").select("*").eq("session_id", session_id)
-        ]);
-        if (!session.data) return res.status(404).json({ error: "Not found" });
-        await mysqlPool.execute(
-            "INSERT INTO visitor_dossier (session_id, ip, city, country, os, browser, total_pages, visited_urls) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP",
-            [session_id, session.data.ip, session.data.city, session.data.country_code, session.data.os, session.data.user_agent, path.data.length, path.data.map(p => p.url).join(" | ")]
-        );
+        await mysqlPool.execute("DELETE FROM visitor_dossier WHERE session_id = ?", [session_id]);
         res.json({ status: "success" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -101,4 +76,4 @@ app.get("/session-details/:id", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("v10.3 Lab Active"));
+app.listen(PORT, () => console.log("v10.4 Unified Lab Active"));
