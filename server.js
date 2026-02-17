@@ -2,12 +2,12 @@ import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import mysql from 'mysql2/promise';
-import fetch from "node-fetch";
 
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+// --- POOLS (Definidos no topo) ---
 const supabase = createClient(
     process.env.SUPABASE_URL || "https://arvzubxbvxrmftljrczi.supabase.co",
     process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFydnp1YnhidnhybWZ0bGpyY3ppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMDMzODAsImV4cCI6MjA4NjU3OTM4MH0.ODUr_GPX4G07_xa7qFc5oTgRHdlhCUocUqXPpj0RvvE"
@@ -23,52 +23,46 @@ const legacyPool = mysql.createPool({
     waitForConnections: true, connectionLimit: 10
 });
 
-app.get("/", (req, res) => res.send("LiveZilla Platinum v10.5 - Secure Legacy Bridge 🛡️🚀"));
+app.get("/", (req, res) => res.send("LiveZilla Platinum v10.6 - Legacy Core Active"));
 
 // --- AUTH ---
 app.post("/auth/login", async (req, res) => {
     const { username, password } = req.body;
     try {
-        const [rows] = await mysqlPool.execute("SELECT id, username, full_name FROM operators WHERE username = ? AND password = ?", [username, password]);
+        const [rows] = await mysqlPool.execute("SELECT id, username, full_name, email FROM operators WHERE username = ? AND password = ?", [username, password]);
         if (rows.length > 0) res.json({ status: "success", user: rows[0] });
         else res.status(401).json({ status: "error" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- LEGACY FULL ENDPOINT (The Heavy Lifter) ---
-app.get("/admin/legacy-full", async (req, res) => {
+// --- LEGACY ENDPOINT (GET) ---
+app.get("/admin/legacy-visitors", async (req, res) => {
     try {
-        // 1. Get Visitors
-        const [visitors] = await legacyPool.execute(
-            "SELECT v.id, v.ip, v.country, v.entrance as created_at, v.resolution, v.js as has_js, v.signature, " +
-            "c.city as city_name, b.browser as browser_name " +
+        const [rows] = await legacyPool.execute(
+            "SELECT v.id, v.ip, v.country, v.entrance, c.city as city_name, b.browser as browser_name " +
             "FROM visitors v " +
             "LEFT JOIN visitor_data_cities c ON v.city = c.id " +
             "LEFT JOIN visitor_data_browsers b ON v.browser = b.id " +
             "ORDER BY v.entrance DESC LIMIT 50"
         );
-
-        // 2. Get Chat Archive & Posts
-        const [chats] = await legacyPool.execute(
-            "SELECT ca.time, ca.duration, ca.closed, " +
-            "cp.fullname as operator_name, u.firstname as user_firstname " +
-            "FROM chat_archive ca " +
-            "LEFT JOIN chat_posts cp ON ca.id = cp.internal_id " +
-            "LEFT JOIN operators u ON ca.user_id = u.id " +
-            "ORDER BY ca.time DESC LIMIT 20"
-        );
-
-        res.json({ 
-            status: "success", 
-            meta: { total_visitors: visitors.length, total_chats: chats.length },
-            data: { visitors: visitors, chats: chats }
-        });
+        res.json(rows);
     } catch (e) { 
-        console.error("Legacy Error:", e);
-        res.status(500).json({ status: "error", error: e.message }); 
+        console.error("Legacy DB Error:", e);
+        res.status(500).json({ error: e.message }); 
     }
 });
 
+app.get("/admin/legacy-full", async (req, res) => {
+    try {
+        const [visitors, chats] = await Promise.all([
+            legacyPool.execute("SELECT v.id, v.ip, v.country, v.entrance, c.city as city_name, b.browser as browser_name FROM visitors v LEFT JOIN visitor_data_cities c ON v.city = c.id LEFT JOIN visitor_data_browsers b ON v.browser = b.id ORDER BY v.entrance DESC LIMIT 50"),
+            legacyPool.execute("SELECT ca.time, ca.duration, ca.closed, cp.fullname as operator_name, u.firstname as user_firstname FROM chat_archive ca LEFT JOIN chat_posts cp ON ca.id = cp.internal_id LEFT JOIN operators u ON ca.user_id = u.id ORDER BY ca.time DESC LIMIT 20")
+        ]);
+        res.json({ visitors, chats });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- DOSSIER ---
 app.get("/admin/dossiers", async (req, res) => {
     try {
         const [rows] = await mysqlPool.execute("SELECT * FROM visitor_dossier ORDER BY updated_at DESC");
@@ -95,4 +89,4 @@ app.get("/session-details/:id", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("v10.5 Secure Legacy Bridge Active"));
+app.listen(PORT, () => console.log("v10.6 Legacy Core Active"));
