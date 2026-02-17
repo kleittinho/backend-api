@@ -24,25 +24,17 @@ const mysqlPool = mysql.createPool({
 });
 
 const WEBHOOK_N8N_CHAT = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
-const WEBHOOK_N8N_AUTH = "https://n8n.equalitycorretora.com/webhook/auth-events"; // Para envio de e-mails
+const WEBHOOK_N8N_AUTH = "https://n8n.equalitycorretora.com/webhook/auth-events";
 
-app.get("/", (req, res) => res.send("LiveZilla DNA Engine v8.9 - Secure Auth 🛡️🚀"));
+app.get("/", (req, res) => res.send("LiveZilla Ultra Engine v9.0 Ultimate Active 🚀🌍"));
 
-// --- SISTEMA DE AUTENTICAÇÃO (MYSQL) ---
-
+// --- AUTH (MYSQL) ---
 app.post("/auth/login", async (req, res) => {
     const { username, password } = req.body;
     try {
-        const [rows] = await mysqlPool.execute(
-            "SELECT id, username, full_name, email FROM operators WHERE username = ? AND password = ?",
-            [username, password]
-        );
-
-        if (rows.length > 0) {
-            res.json({ status: "success", user: rows[0] });
-        } else {
-            res.status(401).json({ status: "error", message: "Login ou senha incorretos" });
-        }
+        const [rows] = await mysqlPool.execute("SELECT id, username, full_name, email FROM operators WHERE username = ? AND password = ?", [username, password]);
+        if (rows.length > 0) res.json({ status: "success", user: rows[0] });
+        else res.status(401).json({ status: "error", message: "Login ou senha incorretos" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -50,52 +42,92 @@ app.post("/auth/forgot-password", async (req, res) => {
     const { email } = req.body;
     try {
         const [rows] = await mysqlPool.execute("SELECT id, username FROM operators WHERE email = ?", [email]);
-        if (rows.length === 0) return res.json({ status: "ok" }); // Silencioso por segurança
-
-        const token = crypto.randomBytes(20).toString('hex');
-        const expires = new Date(Date.now() + 3600000); // 1 hora
-
-        await mysqlPool.execute(
-            "UPDATE operators SET recovery_token = ?, token_expires = ? WHERE email = ?",
-            [token, expires, email]
-        );
-
-        // Disparar n8n para enviar o e-mail
-        fetch(WEBHOOK_N8N_AUTH, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event: 'password_reset', email, token, username: rows[0].username })
-        }).catch(console.error);
-
-        res.json({ status: "ok", message: "Se o e-mail existir, as instruções foram enviadas." });
+        if (rows.length > 0) {
+            const token = crypto.randomBytes(20).toString('hex');
+            const expires = new Date(Date.now() + 3600000);
+            await mysqlPool.execute("UPDATE operators SET recovery_token = ?, token_expires = ? WHERE email = ?", [token, expires, email]);
+            fetch(WEBHOOK_N8N_AUTH, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'password_reset', email, token, username: rows[0].username }) }).catch(console.error);
+        }
+        res.json({ status: "ok" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- TRACKING & CHAT (SUPABASE) ---
-
-app.post("/message", async (req, res) => {
-    const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
-    if (!session_id) return res.status(400).json({ error: "Missing session_id" });
+// --- TRACKING (SUPABASE) ---
+app.post("/track", async (req, res) => {
+    const { event, session_id, data, url, title, user_agent, geo, tech } = req.body;
+    if (!session_id) return res.json({ status: "skipped" });
 
     try {
         const ip = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+        const clientUA = user_agent || req.headers['user-agent'] || '';
+
+        // 1. Upsert Session
         await supabase.from("sessions").upsert({
-            id: session_id, ip: String(ip), user_agent: String(user_agent || ''),
-            state: 'active', url: url || null, referrer: referrer || null,
-            city: geo?.city || null, region: geo?.region || null, country_code: geo?.country || null,
-            updated_at: new Date().toISOString()
+            id: session_id, ip: String(ip), user_agent: String(clientUA),
+            state: 'active', url: url || null, referrer: req.body.referrer || null,
+            city: geo?.city || null, region: geo?.region || null, country_name: geo?.country_name || null, country_code: geo?.country || null,
+            os: tech?.os || null, resolution: tech?.resolution || null, updated_at: new Date().toISOString()
         });
 
-        if (message) {
-            await supabase.from("messages").insert([{ session_id, sender: "user", message }]);
+        // 2. Visitor Path
+        if (event === "page_view") {
+            await supabase.from("visitor_path").insert([{ session_id, url: url || '', title: title || 'Página' }]);
+        }
+
+        // 3. Event Log
+        await supabase.from("events").insert([{ session_id, event, url: url || null, user_agent: clientUA, data: data || {} }]);
+        
+        res.json({ status: "ok" });
+    } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// --- MESSAGING ---
+app.post("/message", async (req, res) => {
+    const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
+    if (!session_id || !message) return res.status(400).json({ error: "Missing data" });
+
+    try {
+        const ip = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+        const { data: sessData } = await supabase.from("sessions").upsert({
+            id: session_id, ip: String(ip), user_agent: String(user_agent || ''),
+            state: 'active', url: url || null, updated_at: new Date().toISOString()
+        }).select("control_mode").single();
+
+        const mode = sessData?.control_mode || 'bot';
+        await supabase.from("messages").insert([{ session_id, sender: "user", message }]);
+
+        if (mode === 'bot') {
             const n8nRes = await fetch(WEBHOOK_N8N_CHAT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId: session_id, chatInput: message })
             });
             res.send(await n8nRes.text());
-        } else { res.json({ status: "ok" }); }
+        } else {
+            res.json({ type: "item", content: "..." });
+        }
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- DATA ACCESS ---
+app.get("/sessions", async (req, res) => {
+    try {
+        const { data } = await supabase.from("sessions").select("*").order("updated_at", { ascending: false }).limit(50);
+        res.json(data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/session-details/:sessionId", async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const [session, events, messages, path] = await Promise.all([
+            supabase.from("sessions").select("*").eq("id", sessionId).single(),
+            supabase.from("events").select("*").eq("session_id", sessionId).order("created_at", { ascending: true }),
+            supabase.from("messages").select("*").eq("session_id", sessionId).order("created_at", { ascending: true }),
+            supabase.from("visitor_path").select("*").eq("session_id", sessionId).order("created_at", { ascending: true })
+        ]);
+        res.json({ session: session.data, events: events.data, messages: messages.data, path: path.data });
+    } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 app.get("/settings", async (req, res) => {
@@ -106,4 +138,16 @@ app.get("/settings", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(3000, () => console.log("v8.9 Secure Auth Active"));
+app.post("/admin/takeover", async (req, res) => {
+    const { session_id, mode } = req.body;
+    await supabase.from("sessions").update({ control_mode: mode }).eq("id", session_id);
+    res.json({ status: "ok" });
+});
+
+app.post("/admin/send", async (req, res) => {
+    const { session_id, message } = req.body;
+    await supabase.from("messages").insert([{ session_id, sender: "bot", message }]);
+    res.json({ status: "ok" });
+});
+
+app.listen(3000, () => console.log("Ultimate v9.0 Active"));
