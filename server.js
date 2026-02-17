@@ -150,3 +150,42 @@ app.post("/admin/send", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("v9.4 Platinum Active"));
+
+// --- PERSISTÊNCIA MYSQL (DOSSIÊ) ---
+app.post("/admin/persist-dossier", async (req, res) => {
+    const { session_id } = req.body;
+    try {
+        const [session, path, messages] = await Promise.all([
+            supabase.from("sessions").select("*").eq("id", session_id).single(),
+            supabase.from("visitor_path").select("*").eq("session_id", session_id),
+            supabase.from("messages").select("*").eq("session_id", session_id)
+        ]);
+
+        if (!session.data) return res.status(404).json({ error: "Session not found" });
+
+        const urls = path.data.map(p => p.url).join(" | ");
+        const chat = messages.data.map(m => `${m.sender}: ${m.message}`).join("\n");
+
+        await mysqlPool.execute(
+            "INSERT INTO visitor_dossier (session_id, ip, city, country, os, browser, referrer, total_pages, chat_messages, visited_urls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE chat_messages = VALUES(chat_messages), visited_urls = VALUES(visited_urls), total_pages = VALUES(total_pages)",
+            [session_id, session.data.ip, session.data.city, session.data.country_name, session.data.os, session.data.user_agent, session.data.referrer, path.data.length, chat, urls]
+        );
+
+        res.json({ status: "success" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/dossiers", async (req, res) => {
+    try {
+        const [rows] = await mysqlPool.execute("SELECT * FROM visitor_dossier ORDER BY updated_at DESC");
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/admin/delete-dossier", async (req, res) => {
+    const { session_id } = req.body;
+    try {
+        await mysqlPool.execute("DELETE FROM visitor_dossier WHERE session_id = ?", [session_id]);
+        res.json({ status: "success" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
