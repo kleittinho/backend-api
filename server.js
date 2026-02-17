@@ -14,8 +14,9 @@ const supabase = createClient(
 
 const WEBHOOK_N8N = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
 
-app.get("/", (req, res) => res.send("LiveZilla DNA Engine v7.0 Active 🚀"));
+app.get("/", (req, res) => res.send("LiveZilla DNA Engine v7.1 Platinum Active 🚀"));
 
+// ENDPOINT DE CONFIGURAÇÕES
 app.get("/settings", async (req, res) => {
     try {
         const { data } = await supabase.from("settings").select("*");
@@ -25,6 +26,33 @@ app.get("/settings", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// LISTAR SESSÕES (PARA A DASHBOARD)
+app.get("/sessions", async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from("sessions")
+            .select("*")
+            .order("updated_at", { ascending: false })
+            .limit(50);
+        if (error) throw error;
+        res.json(data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DETALHES DA SESSÃO
+app.get("/session-details/:sessionId", async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const [session, events, messages] = await Promise.all([
+            supabase.from("sessions").select("*").eq("id", sessionId).single(),
+            supabase.from("events").select("*").eq("session_id", sessionId).order("created_at", { ascending: true }),
+            supabase.from("messages").select("*").eq("session_id", sessionId).order("created_at", { ascending: true })
+        ]);
+        res.json({ session: session.data, events: events.data, messages: messages.data });
+    } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// ROTA DE MENSAGEM DO CLIENTE (ROUTER)
 app.post("/message", async (req, res) => {
     const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
     if (!session_id) return res.status(400).json({ error: "Missing session_id" });
@@ -68,6 +96,7 @@ app.post("/message", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// TRACKING DE EVENTOS
 app.post("/track", async (req, res) => {
     const { event, session_id, data, url, user_agent, geo } = req.body;
     if (!session_id) return res.json({ status: "ok" });
@@ -79,16 +108,19 @@ app.post("/track", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ADMIN: TAKEOVER
 app.post("/admin/takeover", async (req, res) => {
     const { session_id, mode } = req.body;
     await supabase.from("sessions").update({ control_mode: mode }).eq("id", session_id);
     res.json({ status: "ok" });
 });
 
+// ADMIN: SEND MESSAGE
 app.post("/admin/send", async (req, res) => {
     const { session_id, message } = req.body;
     await supabase.from("messages").insert([{ session_id, sender: "bot", message }]);
     res.json({ status: "ok" });
 });
 
-app.listen(3000, () => console.log("v7.0 Active"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("v7.1 Active on " + PORT));
