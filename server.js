@@ -3,13 +3,10 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import mysql from 'mysql2/promise';
 import fetch from "node-fetch";
-import multer from "multer";
 
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
-
-const upload = multer({ dest: 'uploads/' });
 
 const supabase = createClient(
     process.env.SUPABASE_URL || "https://arvzubxbvxrmftljrczi.supabase.co",
@@ -23,12 +20,13 @@ const mysqlPool = mysql.createPool({
 
 const WEBHOOK_N8N = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
 
-app.get("/", (req, res) => res.send("LiveZilla DNA Pro v8.1 Platinum Active 🚀🌍"));
+app.get("/", (req, res) => res.send("LiveZilla DNA Pro v8.4 Platinum Active 🚀🌍"));
 
+// --- SETTINGS ---
 app.get("/settings", async (req, res) => {
     try {
         const [rows] = await mysqlPool.execute("SELECT cfg_key, cfg_value FROM admin_config");
-        const settings = {}; rows.forEach(r => settings[r.cfg_key] = r.cfg_value);
+        const settings = {}; rows.forEach(r => settings[r.cfg_key] = r.value);
         res.json(settings);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -43,6 +41,33 @@ app.post("/settings", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// --- OPERATORS ---
+app.get("/admin/operators", async (req, res) => {
+    const { data } = await supabase.from("operators").select("*").order("name", { ascending: true });
+    res.json(data || []);
+});
+
+app.post("/admin/operators", async (req, res) => {
+    const { name, email, password_hash, role } = req.body;
+    const { data, error } = await supabase.from("operators").upsert({ name, email, password_hash, role }, { onConflict: 'email' });
+    if (error) return res.status(500).json(error);
+    res.json({ status: "ok", data });
+});
+
+// --- CANNED RESPONSES ---
+app.get("/admin/canned", async (req, res) => {
+    const { data } = await supabase.from("canned_responses").select("*").order("shortcut", { ascending: true });
+    res.json(data || []);
+});
+
+app.post("/admin/canned", async (req, res) => {
+    const { shortcut, message, category } = req.body;
+    const { data, error } = await supabase.from("canned_responses").upsert({ shortcut, message, category }, { onConflict: 'shortcut' });
+    if (error) return res.status(500).json(error);
+    res.json({ status: "ok", data });
+});
+
+// --- MESSAGING ---
 app.post("/message", async (req, res) => {
     const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
     if (!session_id) return res.status(400).json({ error: "Missing session_id" });
@@ -98,4 +123,4 @@ app.post("/admin/send", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Platinum v8.1 on " + PORT));
+app.listen(PORT, () => console.log("Platinum v8.4 on " + PORT));
