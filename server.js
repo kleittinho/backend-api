@@ -18,40 +18,23 @@ const pool = new pg.Pool({
 
 const WEBHOOK_N8N = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
 
-app.get("/", (req, res) => res.send("LiveZilla Master Engine v6.1 Active 🚀"));
+app.get("/", (req, res) => res.send("LiveZilla DNA Engine v6.2 Ready 🧬🚀"));
 
-// ENDPOINT DE CONFIGURAÇÕES PARA O CHAT
-app.get("/settings", async (req, res) => {
-    try {
-        const { rows } = await pool.query("SELECT * FROM public.settings");
-        const settings = {};
-        rows.forEach(r => settings[r.key] = r.value);
-        res.json(settings);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ROTA DE MENSAGEM DO CLIENTE
+// ROUTER CENTRAL DE MENSAGENS
 app.post("/message", async (req, res) => {
-    const { session_id, message, user_agent, url, referrer, geo } = req.body;
+    const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
     if (!session_id || !message) return res.status(400).json({ error: "Missing data" });
 
     try {
-        // Obter configurações dinâmicas
-        const settingsRows = await pool.query("SELECT value FROM public.settings WHERE key = 'webhook_url'");
-        const webhook_from_db = settingsRows.rows[0]?.value;
-        const target_webhook = webhook_from_db || WEBHOOK_N8N;
-
-        // Captura de IP e UA robusta
-        const ip = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-        const ua = user_agent || req.headers['user-agent'] || '';
-
-        // 1. Atualizar Sessão
+        const clientIp = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+        
+        // 1. Upsert Session com Metadados Profundos
         const { rows } = await pool.query(
-            `INSERT INTO public.sessions (id, ip, user_agent, state, url, referrer, city, region, country_name, country_code, updated_at) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) 
-             ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), url = EXCLUDED.url, ip = EXCLUDED.ip, user_agent = EXCLUDED.user_agent
+            `INSERT INTO public.sessions (id, ip, user_agent, state, url, referrer, city, region, country_name, country_code, os, resolution, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) 
+             ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), url = EXCLUDED.url, ip = EXCLUDED.ip
              RETURNING control_mode`,
-            [session_id, String(ip), String(ua), 'active', url || null, referrer || null, geo?.city || null, geo?.region || null, geo?.country_name || null, geo?.country || null]
+            [session_id, String(clientIp), String(user_agent || ''), 'active', url || null, referrer || null, geo?.city || null, geo?.region || null, geo?.country_name || null, geo?.country || null, tech?.os || null, tech?.resolution || null]
         );
 
         const mode = rows[0]?.control_mode || 'bot';
@@ -61,7 +44,7 @@ app.post("/message", async (req, res) => {
 
         // 3. Resposta
         if (mode === 'bot') {
-            const n8nRes = await fetch(target_webhook, {
+            const n8nRes = await fetch(WEBHOOK_N8N, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId: session_id, chatInput: message })
@@ -69,42 +52,38 @@ app.post("/message", async (req, res) => {
             const botData = await n8nRes.text();
             res.send(botData);
         } else {
-            res.json({ type: "item", content: "Sua mensagem foi entregue a um consultor humano. Por favor, aguarde." });
+            res.json({ type: "item", content: "Sua mensagem foi entregue ao consultor. Por favor, aguarde." });
         }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// CHECK TRIGGERS (CONVITES PROATIVOS)
+app.post("/check-triggers", async (req, res) => {
+    const { session_id, url, time_on_page } = req.body;
+    try {
+        // Buscar gatilhos que batem com a URL e tempo
+        const { rows: triggers } = await pool.query(
+            "SELECT * FROM public.triggers WHERE is_active = true AND ($1 LIKE '%' || url_match || '%') AND time_on_page <= $2 ORDER BY priority DESC",
+            [url, time_on_page || 0]
+        );
+        
+        // Log de visita em events
+        await pool.query("INSERT INTO public.events (session_id, event, url) VALUES ($1, 'page_pulse', $2)", [session_id, url]);
+        
+        res.json({ triggers });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// LOG DE EVENTOS (CLIQUE, SCROLL, ETC)
 app.post("/track", async (req, res) => {
-    const { event, session_id, data, url, user_agent, geo } = req.body;
-    if (!session_id) return res.json({ status: "skipped" });
+    const { event, session_id, data, url, user_agent } = req.body;
     try {
-        const ip = geo?.ip || req.headers['x-forwarded-for'] || '';
-        await pool.query(
-            "INSERT INTO public.sessions (id, ip, user_agent, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), ip = EXCLUDED.ip",
-            [session_id, String(ip), String(user_agent || '')]
-        );
         await pool.query("INSERT INTO public.events (session_id, event, url, user_agent, data) VALUES ($1, $2, $3, $4, $5)", 
             [session_id, event, url || null, user_agent || null, JSON.stringify(data || {})]);
         res.json({ status: "ok" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/sessions", async (req, res) => {
-    try {
-        const result = await pool.query("SELECT * FROM public.sessions ORDER BY updated_at DESC LIMIT 50");
-        res.json(result.rows);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/session-details/:sessionId", async (req, res) => {
-    try {
-        const { sessionId } = req.params;
-        const session = await pool.query("SELECT * FROM public.sessions WHERE id = $1", [sessionId]);
-        const events = await pool.query("SELECT * FROM public.events WHERE session_id = $1 ORDER BY created_at ASC", [sessionId]);
-        const messages = await pool.query("SELECT * FROM public.messages WHERE session_id = $1 ORDER BY created_at ASC", [sessionId]);
-        res.json({ session: session.rows[0], events: events.rows, messages: messages.rows });
-    } catch (error) { res.status(500).json({ error: error.message }); }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Master v6.1 Active on " + PORT));
+app.listen(3000, () => console.log("DNA Engine v6.2 on 3000"));
