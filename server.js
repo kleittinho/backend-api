@@ -3,6 +3,7 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import mysql from 'mysql2/promise';
 import fetch from "node-fetch";
+import crypto from "crypto";
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -14,15 +15,89 @@ const supabase = createClient(
 );
 
 const mysqlPool = mysql.createPool({
-    host: '108.167.169.203', user: 'equality_jarvis', password: '0wjKfiG3iHi5ouFp', database: 'equality_jarvis',
-    waitForConnections: true, connectionLimit: 10
+    host: '108.167.169.203',
+    user: 'equality_jarvis',
+    password: '0wjKfiG3iHi5ouFp',
+    database: 'equality_jarvis',
+    waitForConnections: true,
+    connectionLimit: 10
 });
 
-const WEBHOOK_N8N = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
+const WEBHOOK_N8N_CHAT = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
+const WEBHOOK_N8N_AUTH = "https://n8n.equalitycorretora.com/webhook/auth-events"; // Para envio de e-mails
 
-app.get("/", (req, res) => res.send("LiveZilla DNA Pro v8.4 Platinum Active 🚀🌍"));
+app.get("/", (req, res) => res.send("LiveZilla DNA Engine v8.9 - Secure Auth 🛡️🚀"));
 
-// --- SETTINGS ---
+// --- SISTEMA DE AUTENTICAÇÃO (MYSQL) ---
+
+app.post("/auth/login", async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const [rows] = await mysqlPool.execute(
+            "SELECT id, username, full_name, email FROM operators WHERE username = ? AND password = ?",
+            [username, password]
+        );
+
+        if (rows.length > 0) {
+            res.json({ status: "success", user: rows[0] });
+        } else {
+            res.status(401).json({ status: "error", message: "Login ou senha incorretos" });
+        }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/auth/forgot-password", async (req, res) => {
+    const { email } = req.body;
+    try {
+        const [rows] = await mysqlPool.execute("SELECT id, username FROM operators WHERE email = ?", [email]);
+        if (rows.length === 0) return res.json({ status: "ok" }); // Silencioso por segurança
+
+        const token = crypto.randomBytes(20).toString('hex');
+        const expires = new Date(Date.now() + 3600000); // 1 hora
+
+        await mysqlPool.execute(
+            "UPDATE operators SET recovery_token = ?, token_expires = ? WHERE email = ?",
+            [token, expires, email]
+        );
+
+        // Disparar n8n para enviar o e-mail
+        fetch(WEBHOOK_N8N_AUTH, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event: 'password_reset', email, token, username: rows[0].username })
+        }).catch(console.error);
+
+        res.json({ status: "ok", message: "Se o e-mail existir, as instruções foram enviadas." });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- TRACKING & CHAT (SUPABASE) ---
+
+app.post("/message", async (req, res) => {
+    const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
+    if (!session_id) return res.status(400).json({ error: "Missing session_id" });
+
+    try {
+        const ip = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+        await supabase.from("sessions").upsert({
+            id: session_id, ip: String(ip), user_agent: String(user_agent || ''),
+            state: 'active', url: url || null, referrer: referrer || null,
+            city: geo?.city || null, region: geo?.region || null, country_code: geo?.country || null,
+            updated_at: new Date().toISOString()
+        });
+
+        if (message) {
+            await supabase.from("messages").insert([{ session_id, sender: "user", message }]);
+            const n8nRes = await fetch(WEBHOOK_N8N_CHAT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: session_id, chatInput: message })
+            });
+            res.send(await n8nRes.text());
+        } else { res.json({ status: "ok" }); }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/settings", async (req, res) => {
     try {
         const [rows] = await mysqlPool.execute("SELECT cfg_key, cfg_value FROM admin_config");
@@ -31,96 +106,4 @@ app.get("/settings", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/settings", async (req, res) => {
-    const { settings } = req.body;
-    try {
-        for (const [key, value] of Object.entries(settings)) {
-            await mysqlPool.execute("INSERT INTO admin_config (cfg_key, cfg_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE cfg_value = ?", [key, value, value]);
-        }
-        res.json({ status: "ok" });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// --- OPERATORS ---
-app.get("/admin/operators", async (req, res) => {
-    const { data } = await supabase.from("operators").select("*").order("name", { ascending: true });
-    res.json(data || []);
-});
-
-app.post("/admin/operators", async (req, res) => {
-    const { name, email, password_hash, role } = req.body;
-    const { data, error } = await supabase.from("operators").upsert({ name, email, password_hash, role }, { onConflict: 'email' });
-    if (error) return res.status(500).json(error);
-    res.json({ status: "ok", data });
-});
-
-// --- CANNED RESPONSES ---
-app.get("/admin/canned", async (req, res) => {
-    const { data } = await supabase.from("canned_responses").select("*").order("shortcut", { ascending: true });
-    res.json(data || []);
-});
-
-app.post("/admin/canned", async (req, res) => {
-    const { shortcut, message, category } = req.body;
-    const { data, error } = await supabase.from("canned_responses").upsert({ shortcut, message, category }, { onConflict: 'shortcut' });
-    if (error) return res.status(500).json(error);
-    res.json({ status: "ok", data });
-});
-
-// --- MESSAGING ---
-app.post("/message", async (req, res) => {
-    const { session_id, message, user_agent, url, referrer, geo, tech } = req.body;
-    if (!session_id) return res.status(400).json({ error: "Missing session_id" });
-    try {
-        const ip = geo?.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-        const { data: sessData } = await supabase.from("sessions").upsert({
-            id: session_id, ip: String(ip), user_agent: String(user_agent || ''),
-            state: 'active', url: url || null, referrer: referrer || null,
-            city: geo?.city || null, region: geo?.region || null, country_name: geo?.country_name || null, country_code: geo?.country || null,
-            os: tech?.os || null, resolution: tech?.resolution || null, updated_at: new Date().toISOString()
-        }).select("control_mode").single();
-
-        const mode = sessData?.control_mode || 'bot';
-        if (message) {
-            await supabase.from("messages").insert([{ session_id, sender: "user", message }]);
-            if (mode === 'bot') {
-                const n8nRes = await fetch(WEBHOOK_N8N, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: session_id, chatInput: message }) });
-                res.send(await n8nRes.text());
-            } else { res.json({ type: "item", content: "..." }); }
-        } else { res.json({ status: "ok" }); }
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/track", async (req, res) => {
-    const { event, session_id, data, url, title, user_agent, geo } = req.body;
-    if (!session_id) return res.json({ status: "ok" });
-    try {
-        const ip = geo?.ip || req.headers['x-forwarded-for'] || '';
-        await supabase.from("sessions").upsert({ id: session_id, ip: String(ip), updated_at: new Date().toISOString() });
-        if (event === "page_view") await supabase.from("visitor_path").insert([{ session_id, url: url || '', title: title || 'Página' }]);
-        await supabase.from("events").insert([{ session_id, event, url: url || null, user_agent: user_agent || null, data: data || {} }]);
-        res.json({ status: "ok" });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get("/sessions", async (req, res) => {
-    try {
-        const { data } = await supabase.from("sessions").select("*").order("updated_at", { ascending: false }).limit(50);
-        res.json(data || []);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/admin/takeover", async (req, res) => {
-    const { session_id, mode } = req.body;
-    await supabase.from("sessions").update({ control_mode: mode }).eq("id", session_id);
-    res.json({ status: "ok" });
-});
-
-app.post("/admin/send", async (req, res) => {
-    const { session_id, message } = req.body;
-    await supabase.from("messages").insert([{ session_id, sender: "bot", message }]);
-    res.json({ status: "ok" });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Platinum v8.4 on " + PORT));
+app.listen(3000, () => console.log("v8.9 Secure Auth Active"));
