@@ -23,7 +23,7 @@ const legacyPool = mysql.createPool({
     waitForConnections: true, connectionLimit: 10
 });
 
-app.get("/", (req, res) => res.send("LiveZilla Platinum v10.4 - Unified Intelligence Engine Active 🛡️🚀"));
+app.get("/", (req, res) => res.send("LiveZilla Platinum v10.5 - Secure Legacy Bridge 🛡️🚀"));
 
 // --- AUTH ---
 app.post("/auth/login", async (req, res) => {
@@ -35,21 +35,40 @@ app.post("/auth/login", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- LEGACY LAB ---
-app.get("/admin/legacy-visitors", async (req, res) => {
+// --- LEGACY FULL ENDPOINT (The Heavy Lifter) ---
+app.get("/admin/legacy-full", async (req, res) => {
     try {
-        const [rows] = await legacyPool.execute(
-            "SELECT v.id, v.ip, v.country, v.entrance, c.city as city_name, b.browser as browser_name " +
+        // 1. Get Visitors
+        const [visitors] = await legacyPool.execute(
+            "SELECT v.id, v.ip, v.country, v.entrance as created_at, v.resolution, v.js as has_js, v.signature, " +
+            "c.city as city_name, b.browser as browser_name " +
             "FROM visitors v " +
             "LEFT JOIN visitor_data_cities c ON v.city = c.id " +
             "LEFT JOIN visitor_data_browsers b ON v.browser = b.id " +
             "ORDER BY v.entrance DESC LIMIT 50"
         );
-        res.json(rows);
-    } catch (e) { res.status(500).json({ error: e.message }); }
+
+        // 2. Get Chat Archive & Posts
+        const [chats] = await legacyPool.execute(
+            "SELECT ca.time, ca.duration, ca.closed, " +
+            "cp.fullname as operator_name, u.firstname as user_firstname " +
+            "FROM chat_archive ca " +
+            "LEFT JOIN chat_posts cp ON ca.id = cp.internal_id " +
+            "LEFT JOIN operators u ON ca.user_id = u.id " +
+            "ORDER BY ca.time DESC LIMIT 20"
+        );
+
+        res.json({ 
+            status: "success", 
+            meta: { total_visitors: visitors.length, total_chats: chats.length },
+            data: { visitors: visitors, chats: chats }
+        });
+    } catch (e) { 
+        console.error("Legacy Error:", e);
+        res.status(500).json({ status: "error", error: e.message }); 
+    }
 });
 
-// --- DOSSIER ---
 app.get("/admin/dossiers", async (req, res) => {
     try {
         const [rows] = await mysqlPool.execute("SELECT * FROM visitor_dossier ORDER BY updated_at DESC");
@@ -76,4 +95,4 @@ app.get("/session-details/:id", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("v10.4 Unified Lab Active"));
+app.listen(PORT, () => console.log("v10.5 Secure Legacy Bridge Active"));
