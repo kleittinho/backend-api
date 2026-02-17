@@ -189,3 +189,27 @@ app.post("/admin/delete-dossier", async (req, res) => {
         res.json({ status: "success" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// --- LEGACY LIVEZILLA LAB ---
+const legacyPool = mysql.createPool({
+    host: '108.167.169.203', user: 'equality_chat', password: 'agata1', database: 'equality_chat',
+    waitForConnections: true, connectionLimit: 5
+});
+
+app.get("/admin/legacy-visitors", async (req, res) => {
+    try {
+        const [rows] = await legacyPool.execute(
+            "SELECT id, ip, city, country, browser, entrance as created_at FROM visitors ORDER BY entrance DESC LIMIT 50"
+        );
+        res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/admin/legacy-details/:id", async (req, res) => {
+    try {
+        const [visitor] = await legacyPool.execute("SELECT * FROM visitors WHERE id = ?", [req.params.id]);
+        const [urls] = await legacyPool.execute("SELECT * FROM visitor_browser_urls WHERE visitor_id = ? ORDER BY created DESC", [req.params.id]);
+        const [chats] = await legacyPool.execute("SELECT * FROM chat_archive WHERE system_id = ?", [req.params.id]);
+        res.json({ visitor: visitor[0], urls, chats });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
