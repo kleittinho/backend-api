@@ -152,6 +152,22 @@ app.post("/admin/bot-settings/:botId", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/admin/widget-snippet/:botId", requireAdmin, async (req, res) => {
+  const botId = req.params.botId;
+  try {
+    const settings = await getBotSettings(botId);
+    const src = `${settings.backend_url.replace(/\/$/, "")}/widget/${botId}.js`;
+    res.json({
+      bot_id: botId,
+      script_src: src,
+      snippet: `<script src="${src}"><\/script>`,
+      settings,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- WIDGET DELIVERY ---
 app.get("/widget/chat.js", (req, res) => {
   try {
