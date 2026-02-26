@@ -6,11 +6,15 @@ const chatWrapper = document.querySelector(".chat-wrapper");
 const chatToggle = document.querySelector(".chat-toggle");
 const userInput = document.getElementById("user-input");
 
-// Configurações
-const BACKEND_URL = "https://backend-api-app.arj8vq.easypanel.host";
-const WEBHOOK_URL = "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
-const BOT_AVATAR = "https://equalitycorretora.com.br/wp-content/uploads/2026/02/anne-final.png";
-const WELCOME_AVATAR = "https://equalitycorretora.com.br/wp-content/uploads/2026/02/ane-joinha.png";
+// Configurações dinâmicas (geradas pelo backend)
+const RUNTIME = window.__ANE_CONFIG || {};
+const BACKEND_URL = RUNTIME.backend_url || "https://backend-api-app.arj8vq.easypanel.host";
+const WEBHOOK_URL = RUNTIME.webhook_url || "https://n8n.equalitycorretora.com/webhook/01ec4b3a-1a4b-4b4e-9cc0-37e7b5e950a6/chat";
+const BOT_AVATAR = RUNTIME.bot_avatar || "https://equalitycorretora.com.br/wp-content/uploads/2026/02/anne-final.png";
+const WELCOME_AVATAR = RUNTIME.welcome_avatar || "https://equalitycorretora.com.br/wp-content/uploads/2026/02/ane-joinha.png";
+const BOT_NAME = RUNTIME.bot_name || "Ane";
+const WELCOME_MESSAGE = RUNTIME.welcome_message || "Olá! 😊 Eu sou a Ane, assistente virtual da Equality Corretora. Como posso te ajudar hoje?";
+const PROACTIVE_SECONDS = Number.isFinite(Number(RUNTIME.proactive_seconds)) ? Number(RUNTIME.proactive_seconds) : 8;
 
 let isFirstOpen = true;
 let isSending = false;
@@ -102,7 +106,7 @@ function showWelcome() {
 
     const text = document.createElement("div");
     text.className = "welcome-text";
-    text.innerHTML = "Olá! 😊 Eu sou a <strong>Ane</strong>, assistente virtual da <strong>Equality Corretora</strong>. Como posso te ajudar hoje?";
+    text.innerHTML = WELCOME_MESSAGE.replace("Ane", `<strong>${BOT_NAME}</strong>`);
 
     welcome.appendChild(avatar);
     welcome.appendChild(text);
@@ -350,6 +354,6 @@ if (userInput) {
                 toggleChat();
                 sessionStorage.setItem("aneAutoOpened", "1");
             }
-        }, 8000);
+        }, PROACTIVE_SECONDS * 1000);
     }
 })();
