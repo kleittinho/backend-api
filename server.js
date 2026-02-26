@@ -48,29 +48,48 @@ function getBotId(req) {
 }
 
 async function getBotSettings(botId = "default") {
-  const { data, error } = await supabase
-    .from("bot_settings")
-    .select("*")
-    .eq("bot_id", botId)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from("bot_settings")
+      .select("*")
+      .eq("bot_id", botId)
+      .maybeSingle();
 
-  if (error) throw error;
+    if (error) {
+      console.warn("bot_settings fallback:", error.message);
+    }
 
-  return {
-    bot_id: botId,
-    bot_name: data?.bot_name || "Ane",
-    primary_color: data?.primary_color || "#10b981",
-    position: data?.position || "bottom-right",
-    bot_avatar: data?.bot_avatar || DEFAULT_BOT_AVATAR,
-    welcome_avatar: data?.welcome_avatar || DEFAULT_WELCOME_AVATAR,
-    welcome_message:
-      data?.welcome_message ||
-      "Olá! 😊 Eu sou a Ane, assistente virtual da Equality Corretora. Como posso te ajudar hoje?",
-    webhook_url: data?.webhook_url || DEFAULT_WEBHOOK_URL,
-    backend_url: data?.backend_url || BACKEND_PUBLIC_URL,
-    proactive_seconds: data?.proactive_seconds ?? 8,
-    enabled: data?.enabled ?? true,
-  };
+    return {
+      bot_id: botId,
+      bot_name: data?.bot_name || "Ane",
+      primary_color: data?.primary_color || "#10b981",
+      position: data?.position || "bottom-right",
+      bot_avatar: data?.bot_avatar || DEFAULT_BOT_AVATAR,
+      welcome_avatar: data?.welcome_avatar || DEFAULT_WELCOME_AVATAR,
+      welcome_message:
+        data?.welcome_message ||
+        "Olá! 😊 Eu sou a Ane, assistente virtual da Equality Corretora. Como posso te ajudar hoje?",
+      webhook_url: data?.webhook_url || DEFAULT_WEBHOOK_URL,
+      backend_url: data?.backend_url || BACKEND_PUBLIC_URL,
+      proactive_seconds: data?.proactive_seconds ?? 8,
+      enabled: data?.enabled ?? true,
+    };
+  } catch (e) {
+    console.warn("bot_settings hard fallback:", e.message);
+    return {
+      bot_id: botId,
+      bot_name: "Ane",
+      primary_color: "#10b981",
+      position: "bottom-right",
+      bot_avatar: DEFAULT_BOT_AVATAR,
+      welcome_avatar: DEFAULT_WELCOME_AVATAR,
+      welcome_message: "Olá! 😊 Eu sou a Ane, assistente virtual da Equality Corretora. Como posso te ajudar hoje?",
+      webhook_url: DEFAULT_WEBHOOK_URL,
+      backend_url: BACKEND_PUBLIC_URL,
+      proactive_seconds: 8,
+      enabled: true,
+    };
+  }
 }
 
 function requireAdmin(req, res, next) {
