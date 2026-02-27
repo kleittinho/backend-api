@@ -5,6 +5,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import mysql from "mysql2/promise";
+import pkg from "pg";
+const { Pool: PgPool } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +43,16 @@ const legacyPool = mysql.createPool({
   database: process.env.LEGACY_MYSQL_DATABASE || "",
   waitForConnections: true,
   connectionLimit: 10,
+});
+
+const pgPool = new PgPool({
+  host: process.env.PG_HOST || "aws-1-sa-east-1.pooler.supabase.com",
+  port: Number(process.env.PG_PORT || 5432),
+  database: process.env.PG_DATABASE || "postgres",
+  user: process.env.PG_USER || "postgres.pojdevjvwnhgdkfbshic",
+  password: process.env.PG_PASSWORD || "Agata33b#@1446",
+  ssl: { rejectUnauthorized: false },
+  max: 10,
 });
 
 function getBotId(req) {
@@ -100,35 +112,40 @@ function requireAdmin(req, res, next) {
 }
 
 async function ensureChatSession(sessionId, botId = "default", metadata = {}) {
-  await supabase.from("chat_sessions").upsert(
-    {
-      session_id: sessionId,
-      bot_id: botId,
-      status: "open",
-      source: metadata?.source || "web_widget",
-      visitor_name: metadata?.visitor_name || null,
-      visitor_email: metadata?.visitor_email || null,
-      visitor_phone: metadata?.visitor_phone || null,
-      last_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "session_id" }
+  await pgPool.query(
+    `insert into public.chat_sessions
+      (session_id, bot_id, status, source, visitor_name, visitor_email, visitor_phone, last_message_at, updated_at)
+     values ($1,$2,'open',$3,$4,$5,$6,now(),now())
+     on conflict (session_id) do update set
+      bot_id=excluded.bot_id,
+      source=excluded.source,
+      visitor_name=coalesce(excluded.visitor_name, public.chat_sessions.visitor_name),
+      visitor_email=coalesce(excluded.visitor_email, public.chat_sessions.visitor_email),
+      visitor_phone=coalesce(excluded.visitor_phone, public.chat_sessions.visitor_phone),
+      last_message_at=now(),
+      updated_at=now()`,
+    [
+      sessionId,
+      botId,
+      metadata?.source || "web_widget",
+      metadata?.visitor_name || null,
+      metadata?.visitor_email || null,
+      metadata?.visitor_phone || null,
+    ]
   );
 }
 
 async function logChatMessage({ sessionId, botId = "default", role, content, metadata = null }) {
-  await supabase.from("chat_messages").insert({
-    session_id: sessionId,
-    bot_id: botId,
-    role,
-    content,
-    metadata,
-  });
+  await pgPool.query(
+    `insert into public.chat_messages (session_id, bot_id, role, content, metadata)
+     values ($1,$2,$3,$4,$5)`,
+    [sessionId, botId, role, content, metadata]
+  );
 
-  await supabase
-    .from("chat_sessions")
-    .update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq("session_id", sessionId);
+  await pgPool.query(
+    `update public.chat_sessions set last_message_at=now(), updated_at=now() where session_id=$1`,
+    [sessionId]
+  );
 }
 
 function parseN8nStreamText(raw = "") {
@@ -146,14 +163,11 @@ function parseN8nStreamText(raw = "") {
 }
 
 async function openAutoTicket({ sessionId, botId = "default", reason, summary }) {
-  await supabase.from("chat_tickets").insert({
-    session_id: sessionId,
-    bot_id: botId,
-    status: "open",
-    source: "auto",
-    reason,
-    summary,
-  });
+  await pgPool.query(
+    `insert into public.chat_tickets (session_id, bot_id, status, source, reason, summary)
+     values ($1,$2,'open','auto',$3,$4)`,
+    [sessionId, botId, reason, summary]
+  );
 }
 
 app.get("/", (req, res) => res.send("Jarvis API - AI Chat Platform"));
@@ -323,35 +337,41 @@ app.post("/chat/message", async (req, res) => {
 });
 
 app.get("/admin/chat/sessions", requireAdmin, async (req, res) => {
-  const limit = Number(req.query.limit || 50);
-  const { data, error } = await supabase
-    .from("chat_sessions")
-    .select("*")
-    .order("updated_at", { ascending: false })
-    .limit(limit);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+  try {
+    const limit = Number(req.query.limit || 50);
+    const { rows } = await pgPool.query(
+      "select * from public.chat_sessions order by updated_at desc limit $1",
+      [limit]
+    );
+    res.json(rows || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/admin/chat/messages/:sessionId", requireAdmin, async (req, res) => {
-  const { data, error } = await supabase
-    .from("chat_messages")
-    .select("*")
-    .eq("session_id", req.params.sessionId)
-    .order("created_at", { ascending: true });
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+  try {
+    const { rows } = await pgPool.query(
+      "select * from public.chat_messages where session_id=$1 order by created_at asc",
+      [req.params.sessionId]
+    );
+    res.json(rows || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/admin/tickets", requireAdmin, async (req, res) => {
-  const limit = Number(req.query.limit || 100);
-  const { data, error } = await supabase
-    .from("chat_tickets")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+  try {
+    const limit = Number(req.query.limit || 100);
+    const { rows } = await pgPool.query(
+      "select * from public.chat_tickets order by created_at desc limit $1",
+      [limit]
+    );
+    res.json(rows || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // --- AUTH ---
