@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Marreta Admin</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#0b1220;color:#e5e7eb;margin:0;padding:24px}
+    .card{max-width:900px;margin:0 auto;background:#111827;border:1px solid #1f2937;border-radius:12px;padding:16px}
+    input,button{padding:10px;border-radius:8px;border:1px solid #374151;background:#0f172a;color:#e5e7eb}
+    button{cursor:pointer;background:#10b981;border:none;color:#04110c;font-weight:bold}
+    pre{background:#020617;padding:12px;border-radius:8px;overflow:auto;max-height:300px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <div class="card" id="loginCard">
+    <h2>Login Admin</h2>
+    <div class="row">
+      <input id="u" placeholder="Usuário" value="admin" />
+      <input id="p" placeholder="Senha" type="password" value="admin123" />
+      <button onclick="login()">Entrar</button>
+    </div>
+    <p id="msg"></p>
+  </div>
+
+  <div class="card hidden" id="panel">
+    <h2>Painel Chatbot</h2>
+    <div class="row">
+      <button onclick="loadSessions()">Sessões</button>
+      <input id="sid" placeholder="session_id" />
+      <button onclick="loadMessages()">Mensagens da sessão</button>
+      <button onclick="loadTickets()">Tickets</button>
+    </div>
+    <h3>Resposta</h3>
+    <pre id="out"></pre>
+  </div>
+
+<script>
+let token = localStorage.getItem('adminToken') || '';
+if(token){ document.getElementById('loginCard').classList.add('hidden'); document.getElementById('panel').classList.remove('hidden'); }
+
+async function login(){
+  const username=document.getElementById('u').value;
+  const password=document.getElementById('p').value;
+  const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
+  const j=await r.json();
+  if(!r.ok){ document.getElementById('msg').textContent=j.message||'Erro'; return; }
+  token=j.token||'';
+  localStorage.setItem('adminToken', token);
+  document.getElementById('loginCard').classList.add('hidden');
+  document.getElementById('panel').classList.remove('hidden');
+}
+
+async function api(path){
+  const r=await fetch(path,{headers:{'x-admin-token':token}});
+  const t=await r.text();
+  try{return JSON.stringify(JSON.parse(t),null,2)}catch{return t}
+}
+async function loadSessions(){ document.getElementById('out').textContent=await api('/admin/chat/sessions'); }
+async function loadMessages(){ const s=document.getElementById('sid').value.trim(); if(!s) return; document.getElementById('out').textContent=await api('/admin/chat/messages/'+encodeURIComponent(s)); }
+async function loadTickets(){ document.getElementById('out').textContent=await api('/admin/tickets'); }
+</script>
+</body>
+</html>

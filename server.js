@@ -20,6 +20,8 @@ const DEFAULT_WEBHOOK_URL = process.env.DEFAULT_WEBHOOK_URL || "https://n8n.equa
 const DEFAULT_BOT_AVATAR = process.env.DEFAULT_BOT_AVATAR || "https://equalitycorretora.com.br/wp-content/uploads/2026/02/anne-final.png";
 const DEFAULT_WELCOME_AVATAR = process.env.DEFAULT_WELCOME_AVATAR || "https://equalitycorretora.com.br/wp-content/uploads/2026/02/ane-joinha.png";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+const ADMIN_USER = process.env.ADMIN_USER || "admin";
+const ADMIN_PASS = process.env.ADMIN_PASS || "admin123";
 
 // --- POOLS ---
 const supabase = createClient(
@@ -172,6 +174,24 @@ async function openAutoTicket({ sessionId, botId = "default", reason, summary })
 
 app.get("/", (req, res) => res.send("Jarvis API - AI Chat Platform"));
 app.get("/health", (req, res) => res.json({ status: "ok", service: "backend-api" }));
+
+app.get("/admin", (req, res) => {
+  try {
+    const html = fs.readFileSync(path.join(__dirname, "admin.html"), "utf8");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (e) {
+    res.status(500).send(e.message);
+  }
+});
+
+app.post("/admin/login", (req, res) => {
+  const { username, password } = req.body || {};
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    return res.json({ status: "success", token: ADMIN_TOKEN || null });
+  }
+  return res.status(401).json({ status: "error", message: "Credenciais inválidas" });
+});
 
 // --- PUBLIC BOT SETTINGS ---
 app.get("/settings", async (req, res) => {
