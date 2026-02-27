@@ -15,10 +15,48 @@ create table if not exists public.bot_settings (
   updated_at timestamptz default now()
 );
 
+create table if not exists public.chat_sessions (
+  id bigserial primary key,
+  session_id text unique not null,
+  bot_id text default 'default',
+  status text default 'open',
+  source text default 'web_widget',
+  visitor_name text,
+  visitor_email text,
+  visitor_phone text,
+  last_message_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.chat_messages (
+  id bigserial primary key,
+  session_id text not null,
+  bot_id text default 'default',
+  role text not null,
+  content text not null,
+  metadata jsonb,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.chat_tickets (
+  id bigserial primary key,
+  session_id text,
+  bot_id text default 'default',
+  status text default 'open',
+  source text default 'auto',
+  reason text,
+  summary text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_chat_messages_session on public.chat_messages(session_id, created_at);
+create index if not exists idx_chat_tickets_status on public.chat_tickets(status, created_at desc);
+
 alter table public.bot_settings enable row level security;
+alter table public.chat_sessions enable row level security;
+alter table public.chat_messages enable row level security;
+alter table public.chat_tickets enable row level security;
 
 -- Recomenda-se política restrita e uso de service_role no backend
--- Exemplo (ajuste conforme seu ambiente):
--- create policy "service role only" on public.bot_settings
---   for all using (auth.role() = 'service_role')
---   with check (auth.role() = 'service_role');

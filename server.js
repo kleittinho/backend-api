@@ -99,6 +99,63 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+async function ensureChatSession(sessionId, botId = "default", metadata = {}) {
+  await supabase.from("chat_sessions").upsert(
+    {
+      session_id: sessionId,
+      bot_id: botId,
+      status: "open",
+      source: metadata?.source || "web_widget",
+      visitor_name: metadata?.visitor_name || null,
+      visitor_email: metadata?.visitor_email || null,
+      visitor_phone: metadata?.visitor_phone || null,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "session_id" }
+  );
+}
+
+async function logChatMessage({ sessionId, botId = "default", role, content, metadata = null }) {
+  await supabase.from("chat_messages").insert({
+    session_id: sessionId,
+    bot_id: botId,
+    role,
+    content,
+    metadata,
+  });
+
+  await supabase
+    .from("chat_sessions")
+    .update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("session_id", sessionId);
+}
+
+function parseN8nStreamText(raw = "") {
+  const lines = String(raw).split("\n").filter(Boolean);
+  let merged = "";
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (obj?.type === "item" && obj?.content) merged += obj.content;
+    } catch {
+      if (!line.trim().startsWith("{")) merged += line;
+    }
+  }
+  return merged.trim() || "Desculpe, tive um problema técnico.";
+}
+
+async function openAutoTicket({ sessionId, botId = "default", reason, summary }) {
+  await supabase.from("chat_tickets").insert({
+    session_id: sessionId,
+    bot_id: botId,
+    status: "open",
+    source: "auto",
+    reason,
+    summary,
+  });
+}
+
 app.get("/", (req, res) => res.send("Jarvis API - AI Chat Platform"));
 app.get("/health", (req, res) => res.json({ status: "ok", service: "backend-api" }));
 
@@ -197,6 +254,104 @@ app.get("/widget/:botId.js", async (req, res) => {
   } catch (e) {
     res.status(500).send(`console.error(${JSON.stringify(e.message)});`);
   }
+});
+
+// --- AI CHAT CORE ---
+app.post("/chat/message", async (req, res) => {
+  const { session_id, message, bot_id = "default", metadata = {} } = req.body || {};
+  if (!session_id || !message) return res.status(400).json({ error: "session_id and message are required" });
+
+  try {
+    const settings = await getBotSettings(bot_id);
+    await ensureChatSession(session_id, bot_id, metadata);
+    await logChatMessage({ sessionId: session_id, botId: bot_id, role: "user", content: String(message), metadata });
+
+    const payload = {
+      sessionId: session_id,
+      chatInput: message,
+      botId: bot_id,
+      metadata,
+    };
+
+    let reply = "";
+    let fallbackReason = null;
+
+    try {
+      const n8nRes = await fetch(settings.webhook_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const raw = await n8nRes.text();
+      reply = parseN8nStreamText(raw);
+      if (!n8nRes.ok) fallbackReason = `n8n_http_${n8nRes.status}`;
+    } catch (e) {
+      fallbackReason = "n8n_unreachable";
+      reply = "No momento estou instável. Já registrei seu atendimento e vou continuar por aqui em instantes.";
+    }
+
+    await logChatMessage({
+      sessionId: session_id,
+      botId: bot_id,
+      role: "assistant",
+      content: reply,
+      metadata: fallbackReason ? { fallbackReason } : null,
+    });
+
+    if (fallbackReason) {
+      await openAutoTicket({
+        sessionId: session_id,
+        botId: bot_id,
+        reason: fallbackReason,
+        summary: `Fallback automático: ${fallbackReason}`,
+      });
+    }
+
+    res.json({ status: "ok", reply, fallback: !!fallbackReason, fallbackReason });
+  } catch (e) {
+    console.error("/chat/message error", e.message);
+    try {
+      await openAutoTicket({
+        sessionId: req.body?.session_id || "unknown",
+        botId: req.body?.bot_id || "default",
+        reason: "backend_exception",
+        summary: e.message,
+      });
+    } catch {}
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/admin/chat/sessions", requireAdmin, async (req, res) => {
+  const limit = Number(req.query.limit || 50);
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.get("/admin/chat/messages/:sessionId", requireAdmin, async (req, res) => {
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .select("*")
+    .eq("session_id", req.params.sessionId)
+    .order("created_at", { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.get("/admin/tickets", requireAdmin, async (req, res) => {
+  const limit = Number(req.query.limit || 100);
+  const { data, error } = await supabase
+    .from("chat_tickets")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
 });
 
 // --- AUTH ---

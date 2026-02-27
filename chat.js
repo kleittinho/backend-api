@@ -310,16 +310,24 @@ async function sendToBot(text) {
     showTyping();
 
     try {
-        const res = await fetch(WEBHOOK_URL, {
+        const res = await fetch(`${BACKEND_URL}/chat/message`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                sessionId: getSessionId(),
-                chatInput: text
+                session_id: getSessionId(),
+                message: text,
+                bot_id: RUNTIME.bot_id || "default",
+                metadata: {
+                    source: "web_widget",
+                    page_url: location.href,
+                    user_agent: navigator.userAgent
+                }
             })
         });
-        const data = await res.text();
-        handleResponse(data);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Erro backend');
+        addBotMessage(data.reply || "Ok");
+        sendTrackEvent("message_received", { response: data.reply || "", fallback: !!data.fallback });
     } catch (err) {
         removeTyping();
         addBotMessage("⚠️ Erro ao conectar com a Anne. Tente novamente.");
