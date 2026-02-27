@@ -51,12 +51,25 @@ create table if not exists public.chat_tickets (
   updated_at timestamptz default now()
 );
 
+create table if not exists public.chat_quick_replies (
+  id bigserial primary key,
+  bot_id text default 'default',
+  label text not null,
+  payload text not null,
+  sort_order integer default 0,
+  enabled boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 create index if not exists idx_chat_messages_session on public.chat_messages(session_id, created_at);
 create index if not exists idx_chat_tickets_status on public.chat_tickets(status, created_at desc);
+create index if not exists idx_chat_quick_replies_bot on public.chat_quick_replies(bot_id, sort_order);
 
 alter table public.bot_settings enable row level security;
 alter table public.chat_sessions enable row level security;
 alter table public.chat_messages enable row level security;
 alter table public.chat_tickets enable row level security;
+alter table public.chat_quick_replies enable row level security;
 
 -- Recomenda-se política restrita e uso de service_role no backend

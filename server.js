@@ -394,6 +394,55 @@ app.get("/admin/tickets", requireAdmin, async (req, res) => {
   }
 });
 
+// --- QUICK REPLIES ---
+app.get("/quick-replies", async (req, res) => {
+  try {
+    const botId = req.query.bot_id || "default";
+    const { rows } = await pgPool.query(
+      "select id, label, payload, sort_order, enabled from public.chat_quick_replies where bot_id=$1 and enabled=true order by sort_order asc, id asc",
+      [botId]
+    );
+    res.json(rows || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/admin/quick-replies/:botId", requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pgPool.query(
+      "select id, bot_id, label, payload, sort_order, enabled, created_at, updated_at from public.chat_quick_replies where bot_id=$1 order by sort_order asc, id asc",
+      [req.params.botId]
+    );
+    res.json(rows || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/admin/quick-replies/:botId", requireAdmin, async (req, res) => {
+  try {
+    const botId = req.params.botId;
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    await pgPool.query("delete from public.chat_quick_replies where bot_id=$1", [botId]);
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i] || {};
+      if (!it.label || !it.payload) continue;
+      await pgPool.query(
+        "insert into public.chat_quick_replies (bot_id,label,payload,sort_order,enabled,updated_at) values ($1,$2,$3,$4,$5,now())",
+        [botId, String(it.label), String(it.payload), Number(it.sort_order ?? i), it.enabled !== false]
+      );
+    }
+    const { rows } = await pgPool.query(
+      "select id, bot_id, label, payload, sort_order, enabled from public.chat_quick_replies where bot_id=$1 order by sort_order asc, id asc",
+      [botId]
+    );
+    res.json({ status: "success", items: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- AUTH ---
 app.post("/auth/login", async (req, res) => {
   const { username, password } = req.body;

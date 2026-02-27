@@ -33,6 +33,17 @@
       <button onclick="loadMessages()">Mensagens da sessão</button>
       <button onclick="loadTickets()">Tickets</button>
     </div>
+
+    <hr style="border-color:#1f2937;margin:14px 0" />
+    <h3>Mensagens pré-prontas (Quick Replies)</h3>
+    <div class="row">
+      <input id="botIdQr" placeholder="bot_id" value="equality-main" />
+      <button onclick="loadQuickReplies()">Carregar QR</button>
+      <button onclick="saveQuickReplies()">Salvar QR</button>
+    </div>
+    <p style="font-size:12px;color:#9ca3af">Formato: uma por linha no padrão <code>Rótulo|Mensagem enviada</code></p>
+    <textarea id="qrText" style="width:100%;min-height:140px;background:#020617;color:#e5e7eb;border:1px solid #374151;border-radius:8px;padding:10px"></textarea>
+
     <h3>Resposta</h3>
     <pre id="out"></pre>
   </div>
@@ -61,6 +72,32 @@ async function api(path){
 async function loadSessions(){ document.getElementById('out').textContent=await api('/admin/chat/sessions'); }
 async function loadMessages(){ const s=document.getElementById('sid').value.trim(); if(!s) return; document.getElementById('out').textContent=await api('/admin/chat/messages/'+encodeURIComponent(s)); }
 async function loadTickets(){ document.getElementById('out').textContent=await api('/admin/tickets'); }
+
+async function loadQuickReplies(){
+  const botId=document.getElementById('botIdQr').value.trim()||'equality-main';
+  const raw=await api('/admin/quick-replies/'+encodeURIComponent(botId));
+  document.getElementById('out').textContent=raw;
+  try{
+    const arr=JSON.parse(raw);
+    document.getElementById('qrText').value=(arr||[]).map(x=>`${x.label}|${x.payload}`).join('\n');
+  }catch{}
+}
+
+async function saveQuickReplies(){
+  const botId=document.getElementById('botIdQr').value.trim()||'equality-main';
+  const lines=document.getElementById('qrText').value.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  const items=lines.map((line,i)=>{
+    const p=line.split('|');
+    const label=(p.shift()||'').trim();
+    const payload=p.join('|').trim()||label;
+    return {label,payload,sort_order:i,enabled:true};
+  }).filter(x=>x.label&&x.payload);
+  const r=await fetch('/admin/quick-replies/'+encodeURIComponent(botId),{
+    method:'POST',headers:{'Content-Type':'application/json','x-admin-token':token},body:JSON.stringify({items})
+  });
+  const t=await r.text();
+  try{document.getElementById('out').textContent=JSON.stringify(JSON.parse(t),null,2)}catch{document.getElementById('out').textContent=t}
+}
 </script>
 </body>
 </html>
